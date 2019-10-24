@@ -44,6 +44,19 @@
 #include <string.h>
 #include <drivers/flash.h>
 #include <fs/nvs.h>
+#include <flash_map.h>
+
+#if USE_PARTITION_MANAGER
+
+#include <pm_config.h>
+#define FLASH_AREA_STORAGE_ID       PM_MCUBOOT_STORAGE_ID
+
+#else
+
+#include <generated_dts_board.h>
+#define FLASH_AREA_STORAGE_ID       DT_FLASH_AREA_STORAGE_ID
+
+#endif /* USE_PARTITION_MANAGER */
 
 static struct nvs_fs fs;
 
@@ -59,7 +72,6 @@ static struct nvs_fs fs;
 #define STRING_ID 4
 #define LONG_ID 5
 
-
 void main(void)
 {
 	int rc = 0, cnt = 0, cnt_his = 0;
@@ -67,13 +79,21 @@ void main(void)
 	u8_t key[8], longarray[128];
 	u32_t reboot_counter = 0U, reboot_counter_his;
 	struct flash_pages_info info;
+	const struct flash_area *fa;
+
+	rc = flash_area_open(FLASH_AREA_STORAGE_ID, &fa);
+	if (rc) {
+		printk("Unable to get storage page area");
+		while (1) {
+		}
+	}
 
 	/* define the nvs file system by settings with:
 	 *	sector_size equal to the pagesize,
 	 *	3 sectors
 	 *	starting at DT_FLASH_AREA_STORAGE_OFFSET
 	 */
-	fs.offset = DT_FLASH_AREA_STORAGE_OFFSET;
+	fs.offset = fa->fa_off; //DT_FLASH_AREA_STORAGE_OFFSET;
 	rc = flash_get_page_info_by_offs(device_get_binding(DT_FLASH_DEV_NAME),
 					 fs.offset, &info);
 	if (rc) {
