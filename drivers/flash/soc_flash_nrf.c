@@ -73,6 +73,18 @@ static struct k_sem sem_lock;
 #define SYNC_UNLOCK()
 #endif
 
+#ifdef CONFIG_NRF52_ANOMALY_242_WORKAROUND
+#include <hal/nrf_power.h>
+static int suspend_pofwarn(void);
+static void restore_pofwarn(void);
+
+#define SUSPEND_CONFLICTING_SYSTEMS() suspend_pofwarn()
+#define RESUME_CONFLICTING_SYSTEMS()  restore_pofwarn()
+#else
+#define SUSPEND_CONFLICTING_SYSTEMS() 0
+#define RESUME_CONFLICTING_SYSTEMS()
+#endif /* CONFIG_NRF52_ANOMALY_242_WORKAROUND */
+
 
 static int write(off_t addr, const void *data, size_t len);
 static int erase(uint32_t addr, uint32_t size);
@@ -343,12 +355,20 @@ static int erase_op(void *context)
 
 #ifdef CONFIG_SOC_FLASH_NRF_UICR
 	if (e_ctx->flash_addr == (off_t)NRF_UICR) {
+		if (SUSPEND_CONFLICTING_SYSTEMS()) {
+			return -ECANCELED;
+		}
+
 		(void)nrfx_nvmc_uicr_erase();
+		RESUME_CONFLICTING_SYSTEMS();
 		return FLASH_OP_DONE;
 	}
 #endif
 
 	do {
+		if (SUSPEND_CONFLICTING_SYSTEMS()) {
+			return -ECANCELED;
+		}
 
 #if defined(CONFIG_SOC_FLASH_NRF_PARTIAL_ERASE)
 		if (e_ctx->flash_addr == e_ctx->flash_addr_next) {
@@ -366,6 +386,8 @@ static int erase_op(void *context)
 		e_ctx->len -= pg_size;
 		e_ctx->flash_addr += pg_size;
 #endif /* CONFIG_SOC_FLASH_NRF_PARTIAL_ERASE */
+
+		RESUME_CONFLICTING_SYSTEMS();
 
 #ifndef CONFIG_SOC_FLASH_NRF_RADIO_SYNC_NONE
 		i++;
@@ -410,10 +432,15 @@ static int write_op(void *context)
 			count = w_ctx->len;
 		}
 
+		if (SUSPEND_CONFLICTING_SYSTEMS()) {
+			return -ECANCELED;
+		}
+
 		nrfx_nvmc_bytes_write(w_ctx->flash_addr,
 				      (const void *)w_ctx->data_addr,
 				      count);
 
+		RESUME_CONFLICTING_SYSTEMS();
 		shift_write_context(count, w_ctx);
 
 #ifndef CONFIG_SOC_FLASH_NRF_RADIO_SYNC_NONE
@@ -428,9 +455,13 @@ static int write_op(void *context)
 #endif /* CONFIG_SOC_FLASH_NRF_EMULATE_ONE_BYTE_WRITE_ACCESS */
 	/* Write all the 4-byte aligned data */
 	while (w_ctx->len >= sizeof(uint32_t)) {
+		if (SUSPEND_CONFLICTING_SYSTEMS()) {
+			return -ECANCELED;
+		}
+
 		nrfx_nvmc_word_write(w_ctx->flash_addr,
 				     UNALIGNED_GET((uint32_t *)w_ctx->data_addr));
-
+		RESUME_CONFLICTING_SYSTEMS();
 		shift_write_context(sizeof(uint32_t), w_ctx);
 
 #ifndef CONFIG_SOC_FLASH_NRF_RADIO_SYNC_NONE
@@ -447,10 +478,14 @@ static int write_op(void *context)
 #if IS_ENABLED(CONFIG_SOC_FLASH_NRF_EMULATE_ONE_BYTE_WRITE_ACCESS)
 	/* Write remaining unaligned data */
 	if (w_ctx->len) {
+		if (SUSPEND_CONFLICTING_SYSTEMS()) {
+			return -ECANCELED;
+		}
+
 		nrfx_nvmc_bytes_write(w_ctx->flash_addr,
 				      (const void *)w_ctx->data_addr,
 				      w_ctx->len);
-
+		RESUME_CONFLICTING_SYSTEMS();
 		shift_write_context(w_ctx->len, w_ctx);
 	}
 #endif /* CONFIG_SOC_FLASH_NRF_EMULATE_ONE_BYTE_WRITE_ACCESS */
@@ -488,3 +523,44 @@ static int write(off_t addr, const void *data, size_t len)
 
 	return write_op(&context);
 }
+
+#ifdef CONFIG_NRF52_ANOMALY_242_WORKAROUND
+/* Disable POFWARN by writing POFCON before a write or erase operation.
+ * Do not attempt to write or erase if EVENTS_POFWARN is already asserted.
+ */
+static bool pofcon_enabled;
+static nrf_power_pof_thr_t pofcon_pof_thr;
+
+static int suspend_pofwarn(void)
+{
+	bool enabled;
+	nrf_power_pof_thr_t pof_thr;
+
+	pof_thr = nrf_power_pofcon_get(NRF_POWER, &enabled);
+
+	if (enabled) {
+		nrf_power_pofcon_set(NRF_POWER, false, NRF_POWER_POFTHR_V27);
+
+		/* This check need to be reworked once POFWARN event will be
+		 * served by zephyr.
+		 */
+		if (nrf_power_event_get_and_clear(NRF_POWER,
+						  NRF_POWER_EVENT_POFWARN)) {
+			nrf_power_pofcon_set(NRF_POWER, true, pof_thr);
+			return -ECANCELED;
+		}
+
+		pofcon_enabled = enabled;
+		pofcon_pof_thr = pof_thr;
+	}
+
+	return 0;
+}
+
+static void restore_pofwarn(void)
+{
+	if (pofcon_enabled) {
+		nrf_power_pofcon_set(NRF_POWER, true, pofcon_pof_thr);
+	}
+}
+#endif  /* CONFIG_NRF52_ANOMALY_242_WORKAROUND */
