@@ -7,6 +7,7 @@
 
 /*
  * Copyright (c) 2017-2018 Linaro Limited
+ * Copyright (c) 2021 Nordic Semiconductor
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -820,6 +821,12 @@ static inline char *inet_ntop(sa_family_t family, const void *src, char *dst,
 #define SO_IP_ECHO_REPLY 31
 /** sockopt: disable IPv6 ICMP replies */
 #define SO_IPV6_ECHO_REPLY 32
+
+/**
+ * sockopt: Receive timeout
+ * Applies to receive functions like recv(), but not to connect()
+ */
+#define SO_RCVTIMEO 20
 
 /** sockopt: Timestamp TX packets */
 #define SO_TIMESTAMPING 37
