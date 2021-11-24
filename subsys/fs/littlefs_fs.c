@@ -767,9 +767,13 @@ static const struct fs_file_system_t littlefs_fs = {
 	.statvfs = littlefs_statvfs,
 };
 
+#ifndef USE_PARTITION_MANAGER
+#define USE_PARTITION_MANAGER 0
+#endif
+
 #define DT_DRV_COMPAT zephyr_fstab_littlefs
 #define FS_PARTITION(inst) DT_PHANDLE_BY_IDX(DT_DRV_INST(inst), partition, 0)
-
+#if FLASH_AREA_LABEL_EXISTS(littlefs_storage)
 #define DEFINE_FS(inst) \
 static uint8_t __aligned(4) \
 	read_buffer_##inst[DT_INST_PROP(inst, cache_size)]; \
@@ -801,9 +805,49 @@ struct fs_mount_t FS_FSTAB_ENTRY(DT_DRV_INST(inst)) = { \
 	.type = FS_LITTLEFS, \
 	.mnt_point = DT_INST_PROP(inst, mount_point), \
 	.fs_data = &fs_data_##inst, \
-	.storage_dev = (void *)DT_FIXED_PARTITION_ID(FS_PARTITION(inst)), \
+	.storage_dev = (void *) (USE_PARTITION_MANAGER ?\
+	  FLASH_AREA_ID(littlefs_storage) :\
+	  DT_FIXED_PARTITION_ID(FS_PARTITION(inst))), \
 	.flags = FSTAB_ENTRY_DT_MOUNT_FLAGS(DT_DRV_INST(inst)), \
 };
+#else
+#define DEFINE_FS(inst) \
+static uint8_t __aligned(4) \
+	read_buffer_##inst[DT_INST_PROP(inst, cache_size)]; \
+static uint8_t __aligned(4) \
+	prog_buffer_##inst[DT_INST_PROP(inst, cache_size)]; \
+static uint32_t lookahead_buffer_##inst[DT_INST_PROP(inst, lookahead_size) \
+					/ sizeof(uint32_t)]; \
+BUILD_ASSERT(DT_INST_PROP(inst, read_size) > 0); \
+BUILD_ASSERT(DT_INST_PROP(inst, prog_size) > 0); \
+BUILD_ASSERT(DT_INST_PROP(inst, cache_size) > 0); \
+BUILD_ASSERT(DT_INST_PROP(inst, lookahead_size) > 0); \
+BUILD_ASSERT((DT_INST_PROP(inst, lookahead_size) % 8) == 0); \
+BUILD_ASSERT((DT_INST_PROP(inst, cache_size) \
+	      % DT_INST_PROP(inst, read_size)) == 0); \
+BUILD_ASSERT((DT_INST_PROP(inst, cache_size) \
+	      % DT_INST_PROP(inst, prog_size)) == 0); \
+static struct fs_littlefs fs_data_##inst = { \
+	.cfg = { \
+		.read_size = DT_INST_PROP(inst, read_size), \
+		.prog_size = DT_INST_PROP(inst, prog_size), \
+		.cache_size = DT_INST_PROP(inst, cache_size), \
+		.lookahead_size = DT_INST_PROP(inst, lookahead_size), \
+		.read_buffer = read_buffer_##inst, \
+		.prog_buffer = prog_buffer_##inst, \
+		.lookahead_buffer = lookahead_buffer_##inst, \
+	}, \
+}; \
+struct fs_mount_t FS_FSTAB_ENTRY(DT_DRV_INST(inst)) = { \
+	.type = FS_LITTLEFS, \
+	.mnt_point = DT_INST_PROP(inst, mount_point), \
+	.fs_data = &fs_data_##inst, \
+	.storage_dev = (void *) (USE_PARTITION_MANAGER ?\
+	  FLASH_AREA_ID(storage) :\
+	  DT_FIXED_PARTITION_ID(FS_PARTITION(inst))), \
+	.flags = FSTAB_ENTRY_DT_MOUNT_FLAGS(DT_DRV_INST(inst)), \
+};
+#endif
 
 DT_INST_FOREACH_STATUS_OKAY(DEFINE_FS)
 
