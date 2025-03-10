@@ -455,8 +455,15 @@ if (CONFIG_BUILD_WITH_TFM)
     # Use the TF-M NS binary as the Non-Secure application firmware image
     set(NS_APP_FILE $<TARGET_PROPERTY:tfm,TFM_NS_HEX_FILE>)
   else()
-    # Use the Zephyr binary as the Non-Secure application firmware image
-    set(NS_APP_FILE ${CMAKE_BINARY_DIR}/zephyr/${KERNEL_HEX_NAME})
+
+    if(CONFIG_NRF_XIP_SPLIT_IMAGE)
+      set(NS_APP_FILE ${CMAKE_BINARY_DIR}/zephyr/${KERNEL_HEX_NAME}.internal)
+      message(STATUS "TF-M with NRF_XIP_SPLIT_IMAGE is enabled.")
+    else()
+      # Use the Zephyr binary as the Non-Secure application firmware image
+      set(NS_APP_FILE ${CMAKE_BINARY_DIR}/zephyr/${KERNEL_HEX_NAME})
+    endif()
+
   endif()
 
   if (NOT CONFIG_TFM_BL2)
