@@ -28,6 +28,7 @@
 		nordic,802154-spinel-ipc = &ipc0;
 		zephyr,canbus = &can120;
 		zephyr,entropy = &prng;
+		zephyr,pm-s2ram-context = &cpuapp_s2ram;
 	};
 
 	aliases {
